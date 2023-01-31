@@ -1,21 +1,37 @@
 const Web3 = require('web3');
 
+const ContractNameABI = require('./contractNameSymbol.json');
+
 const web3 = new Web3(
-    "https://mainnet.infura.io/v3/738d607b3d294eb58ad33862a792d0bc"
+    "https://mainnet.infura.io/v3/585178b4d49e49c59162eee163ccade8"
 );
 
+/**
+ * each log should have
+ * - conract-address
+ * - contract-name
+ * - contract-symbol
+ * - transaction type / function call name/ log name 
+ * - value obj with decode data
+ * each tx such have
+ * - logs obj 
+ * - and in last tx hash
+ */
 
-const contractAddress = "0xdef1c0ded9bec7f1a1670819833240f027b25eff"; // 0x protocal proxy contract
+///////////- Global Variables -/////////////
+let count
+///////////////////////////////////////////
 
-// const fillLimitOrder = "", unknown = "", 
+const contractAddress = "0x1111111254eeb25477b68fb85ed929f73a960582"; // Address of 1inch Aggregator
 
-let functionArray = ["0x312aae89", "0x415565b0", "0xf6274f66", "0x000000ff", "0x5f575529", "0xde7b5f9e", "0x56603732", "0x5cf54026", "0xca8bd1f9"]
-// 0x00000000
-
-
-const limitOrderSig = web3.eth.abi.encodeEventSignature('LimitOrderFilled(bytes32,address,address,address,address,address,uint128,uint128,uint128,uint256,bytes32)');
-console.log("limit ",limitOrderSig)
-
+const swapFunctionSig = web3.eth.abi.encodeFunctionSignature(
+    "swap(address,(address,address,address,address,uint256,uint256,uint256),bytes,bytes)"
+    );
+    console.log("Function signature of swap : " + swapFunctionSig);
+    
+    const unoswapFunctionSig = web3.eth.abi.encodeFunctionSignature("unoswap(address,uint256,uint256,uint256[])")
+    console.log("Function signature of unoswap : " + unoswapFunctionSig);
+    
 /**
 * @returns txn of specific contract and takes only swap and unoswap function call txns
 */
@@ -24,66 +40,68 @@ async function getTransactionFromBlock() {
     let arr = []
 
     const blockNumber = await web3.eth.getBlockNumber();
-    // const blockNumber  = '16518400'
     console.log("blockNumber", blockNumber);
 
     // 
-    for (let i = blockNumber - 60; i <= blockNumber; i++) {
-        console.log("blockl", i)
+    for (let i = blockNumber - 10; i <= blockNumber; i++) {
+
         // getting the specific block txns
         let getBlock = await web3.eth.getBlock(i, true)
 
-        if(getBlock.transactions){
-             // accessing each txn of the block
+        // accessing each txn of the block
         getBlock.transactions.forEach(async (tx) => {
 
             // filter it with 1inch contract only
-            // if (tx.to !== null && tx.to.toLowerCase() === contractAddress) {
+            if (tx.to !== null && tx.to.toLowerCase() === contractAddress) {
 
                 // console.log("TX ",tx)
 
                 // filtering only swap and unoswap function call
-                // if (functionArray.indexOf(tx.input.slice(0, 10)) != -1) {
+                if (tx.input.slice(0, 10) === swapFunctionSig || tx.input.slice(0, 10) === unoswapFunctionSig) {
+
                     count++;
                     
-                    let resultArr = await getLogsDataFromHash(tx.hash)
-                    if(resultArr.length != 0){
-                        arr.push(resultArr)
-                    }
+                    let resultArr = await getLogsDataFromHash(tx)
                     // console.log("result received ", resultArr)
+                    arr.push(resultArr)
                     
                     // pushing each tranaction arr to sub arr
-                // }
-            // }
+                }
+            }
         })
-        }
     }
     return arr
 }
 
+/**
+ * @param txObj takes obj of transaction
+ * @returns object which includes hash and logs object of that transaction hash 
+ */
+async function getLogsDataFromHash(txObj) {
+    // getting logs object for specifc tx by hash
+    let result = await web3.eth.getTransactionReceipt(txObj.hash)
 
-
-async function getLogsDataFromHash(hash){
-    console.log("hash ",hash)
-    console.log("count", count)
-    let result = await web3.eth.getTransactionReceipt(hash)
     let data = filterLogsOfspecificTx(result)
 
-    // console.log("filter ",data)
+    // adding hash of each txn in last
+    data.push({
+        "hash": txObj.hash
+    })
+    
     return data
 }
 
+/**
+ * 
+ */
 function filterLogsOfspecificTx(logsObj){
     let result = []
     let logs = logsObj.logs
 
     logs.forEach((log) => {
-        let txtype = EventType(log)
+        let txtype = transactionType(log)
         if(txtype){
-            // console.log("obj", txtype)
-            txtype.hash = logsObj['transactionHash']
             result.push(txtype)
-            console.log("result", result)
         }
     })
 
@@ -91,16 +109,31 @@ function filterLogsOfspecificTx(logsObj){
     return result
 }
 
-function EventType(log) {
-    if(log.topics[0].toLowerCase() == limitOrderSig){
-        return decodeFillOrder(log)
-    } 
-    // else {
-    //     return "other"
-    // }
+/**
+ * 
+ */
+function transactionType(log) {
+    // console.log(log)
+    // hash of events 
+    let transferEvent = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    let approvalEvent = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
+    let depositEvent = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c";
+    let withdrawelEvent = "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65";
+    let swapEvent = "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822";
+    let syncEvent = "0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1";
+
+    if (log.topics[0].toLowerCase() == transferEvent) {
+        return transferEventFn(log)
+    } else if (log.topics[0].toLowerCase() == swapEvent) {
+        return swapEventFn(log);
+    }
 }
 
-function decodeFillOrder(log){
+/**
+ * @param log takes a specific log and access topics array
+ * @returns decode output in object
+ */
+function transferEventFn(log) {
     let topicArr = []
 
     for (let i = 1; i < log.topics.length; i++) {
@@ -110,48 +143,19 @@ function decodeFillOrder(log){
     let res = web3.eth.abi.decodeLog(
         [
             {
-                "name": "orderHash",
-                "type": "bytes32"
-            },
-            {
-                "name": "maker",
+                "indexed": true,
+                "name": "from",
                 "type": "address"
             },
             {
-                "name": "taker",
+                "indexed": true,
+                "name": "to",
                 "type": "address"
             },
             {
-                "name": "feeRecipient",
-                "type": "address"
-            },
-            {
-                "name": "makerToken",
-                "type": "address"
-            }, 
-            {
-                "name": "takerToken",
-                "type": "address"
-            },
-            {
-                "name": "takerTokenFilledAmount",
-                "type": "uint128"
-            },
-            {
-                "name": "makerTokenFilledAmount",
-                "type": "uint128"
-            },
-            {
-                "name": "takerTokenFeeFilledAmount",
-                "type": "uint128"
-            },
-            {
-                "name": "protocolFeePaid",
+                "indexed": false,
+                "name": "value",
                 "type": "uint256"
-            },
-            {
-                "name": "pool",
-                "type": "bytes32"   
             }
         ],
         log["data"],
@@ -160,36 +164,135 @@ function decodeFillOrder(log){
 
     return {
         "contract-address": log.address,
-        "decodeValue": {
-            "orderHash": res.orderHash,
-            "maker": res.maker,
-            "taker": res.taker,
-            "feeRecipient": res.feeRecipient,
-            "makerToken": res.makerToken,
-            "takerToken": res.takerToken,
-            "takerTokenFilledAmount": res.takerTokenFilledAmount,
-            "makerTokenFilledAmount": res.makerTokenFilledAmount,
-            "takerTokenFeeFilledAmount": res.takerTokenFeeFilledAmount,
-            "protocolFeePaid": res.protocolFeePaid,
-            "pool": res.pool
+        "transaction-type": "Transfer",
+        "value": {
+            "from": res.from,
+            "to": res.to,
+            "value": res.value
+        }
+    }  
+}
+
+/**
+ * @param log takes a specific log and access topics array
+ * @returns decode output in object
+ */
+function swapEventFn(log) {
+    let topicArr = []
+    
+    for (let i = 1; i < log.topics.length; i++) {
+        topicArr.push(log.topics[i])
+    }
+    
+    let res = web3.eth.abi.decodeLog(
+        [
+            {
+                "indexed": true,
+                "name": "sender",
+                "type": "address"
+            },
+            {
+                "name": "amount0In",
+                "type": "uint256"
+            },
+            {
+                "name": "amount1In",
+                "type": "uint256"
+            },
+            {
+                "name": "amount0Out",
+                "type": "uint256"
+            },
+            {
+                "name": "amount1Out",
+                "type": "uint256"
+            },
+            {
+                "indexed": true,
+                "name": "to",
+                "type": "address"
+            }
+        ],
+        log["data"],
+        topicArr
+    );
+
+    return {
+        "contract-address": log.address,
+        "transaction-type": "Swap",
+        "value": {
+            "sender": res.sender,
+            "amount0In": res.amount0In,
+            "amount1In": res.amount1In,
+            "amount0Out": res.amount0Out,
+            "amount1Out": res.amount1Out,
+            "to": res.to,
         }
     }
 }
 
-// DecodeTxnOfOrderFilledEvent('0x87b06f51b6e14c9edc26f9af246bc7b4ba3d82ae7b61597dda772a0a6547f934').then((result) => {
-//     console.log(result)
-// })
 
-function consoleResult(resultArray){
-    for(let i = 0 ; i < resultArray; i++){
-        for(let j = 0 ; j < resultArray[i]; j++){
-            console.log(resultArray[i][j])
-        }
-    }
+async function getContractName(contractAddress) {
+    const contract = new web3.eth.Contract(ContractNameABI, contractAddress);
+
+    let name = await contract.methods.name().call()
+    let symbol = await contract.methods.symbol().call()
+
+    // console.log(name)
+    // console.log(symbol)
+
+    return {"name": name, "symbol": symbol}
 }
 
-getTransactionFromBlock().then((result) => {
-    console.log("count ",count)
-    console.log("result final ",result)
-    consoleResult(result)
+async function getContracNameForArray(txArray){
+    for(let i = 0; i < txArray.length; i++){
+        let contractNames = []
+        for(let j = 0; j< txArray[i].length; j++){
+                if(txArray[i][j]['contract-address']){
+                    let contractNameAndSymbol = await getContractName(txArray[i][j]['contract-address'])
+                    txArray[i][j]['contract-name'] = contractNameAndSymbol.name
+                    txArray[i][j]['contract-symbol'] = contractNameAndSymbol.symbol
+                    if(contractNames.indexOf(contractNameAndSymbol.name) == -1 || j == txArray.length - 1){
+                        contractNames.push(contractNameAndSymbol.name)
+                    }
+                } else if(txArray[i][j].hash){
+                    txArray[i][j]['contract-names'] = contractNames
+                }
+        }
+    }
+    return txArray
+}
+
+function accessAndConsole(array) {
+    for(let i = 0; i < array.length; i++){
+        console.log('i ',i)
+        for(let j = 0; j< array[i].length; j++){
+            console.log(array[i][j])
+        }
+    }    
+}
+
+
+
+
+async function main() {
+    let filterArray = []
+    let txHashArray = await getTransactionFromBlock();
+
+    const result = await getContracNameForArray(txHashArray)
+
+    accessAndConsole(result);
+    return result
+}
+
+main().then((result) => {
+    console.log("txn received : ", count)
+    console.log("result count : ", result.length)
+    // console.log(result)
 })
+
+// getTransactionFromBlock().then((result) => {
+//     console.log("txn received : ", count)
+//     console.log("result count : ", result.length)
+//     console.log("RESULT ",result)
+// })
